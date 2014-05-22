@@ -280,10 +280,9 @@ public:
 			*/
 
 
-			
-			for(INTTYPE i(begin); i < end; ++i)
+			for(INTTYPE i(end-begin); --i;)
 			{
-				vec_value = vec[i];
+				vec_value = vec[i+begin];
 				seq_char = seq[ vec_value + depth];
 				//bucket[ seq_char ][ bucket_count[seq_char]++ ] = vec_value;
 				if(seq_char == 'T')
