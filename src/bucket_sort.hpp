@@ -279,10 +279,11 @@ public:
 			}
 			*/
 
-
-			for(INTTYPE i(end-begin); --i;)
+			//for(INTTYPE i(begin); i<end; ++i)
+			for(INTTYPE i(n+1); --i;)
 			{
-				vec_value = vec[i+begin];
+				vec_value = vec[end-i];
+				//vec_value = vec[i];
 				seq_char = seq[ vec_value + depth];
 				//bucket[ seq_char ][ bucket_count[seq_char]++ ] = vec_value;
 				if(seq_char == 'T')
