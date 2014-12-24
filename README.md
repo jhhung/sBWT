@@ -6,12 +6,16 @@
 + g++ 4.7 or newer
 
 > ####setup
-> > $cmake .
-
-> > $make
-
+~~~
+$cmake .
+$make
+~~~
 > ####usage
 > build index
-
-
-> > $./sbwt build -i <reference.fa> -p <ouput prefix>
+~~~
+$./sbwt build -i [reference.fa] -p [ouput prefix]
+~~~
+> > for more detail please use :
+~~~
+$./sbwt build -h
+~~~
