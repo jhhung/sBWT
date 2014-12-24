@@ -5,12 +5,13 @@
 + boost 1.55.0
 + g++ 4.7 or newer
 
-####setup
-$cmake .
+> ####setup
+> > $cmake .
+
+> > $make
+
+> ####usage
+> build index
 
 
-$make
-
-####usage
-#####build index
-$./sbwt build -i <reference.fa> -p <ouput prefix>
+> > $./sbwt build -i <reference.fa> -p <ouput prefix>
