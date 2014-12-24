@@ -15,7 +15,16 @@ $make
 ~~~
 $./sbwt build -i [reference.fa] -p [ouput prefix]
 ~~~
-> > for more detail please use :
+> for more detail please use :
 ~~~
 $./sbwt build -h
+~~~
+
+> alignment
+~~~
+$./sbwt map -i [reads.fq] -p [index prefix] -o [ouput.sam]
+~~~
+> for mor detail please use :
+~~~
+$./sbwt map -h
 ~~~
