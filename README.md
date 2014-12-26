@@ -92,5 +92,7 @@ com_rf xxx [reads.fq] 3125 128 [reads number] > [output.sam] 	#for mapping
 ##Contact
 - Jui-Hung Hung <juihunghung@gmail.com>
 - Chou Min-Te <poi5305@gmail.com>
+- Hong Ting-Wei <thestyle1202@gmail.com>
+- Chang Chia-Hua <CHChang810716@gmail.com>
 
 
