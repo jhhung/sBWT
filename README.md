@@ -1,11 +1,11 @@
 Sbwt aligner
 =========
-Sbwt aligner is a Burrows–Wheeler transform (BWT) based fast aligner specialized in parallelized indexing from Next Generation Sequencing data.  
+sBWT aligner is a Burrows–Wheeler transform (BWT) based fast aligner specialized in parallelized indexing from Next Generation Sequencing data. 
 
-Sbwt aligner is released under GPLv2 with additional restriction so that is only applicable to individuals and non-profits and that any for-profit company must purchase a different license.    
+sBWT aligner is released under GPLv2 with additional restriction so that is only applicable to individuals and non-profits and that any for-profit company must purchase a different license.    
 
 ##INSTALL
-*Only 64 bits systems are able to compile and run Sbwt aligner.
+*Only 64 bits systems are able to compile and run sBWT aligner.
     
 ### Run the binary directly without installation 
 Please try the precompiled binaries first, most of the linux systems should be able to run Tailor without any troubles.
