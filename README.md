@@ -1,4 +1,4 @@
-Sbwt aligner
+sBWT aligner
 =========
 sBWT aligner is a Burrows–Wheeler transform (BWT) based fast aligner specialized in parallelized indexing from Next Generation Sequencing data. 
 
