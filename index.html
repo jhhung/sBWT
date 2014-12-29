@@ -39,49 +39,140 @@
         <ul></ul>
       </nav>
       <section>
-        <h3>
-<a id="on-cpu" class="anchor" href="#on-cpu" aria-hidden="true"><span class="octicon octicon-link"></span></a>ON CPU</h3>
+        <h1>
+<a id="sbwt-aligner" class="anchor" href="#sbwt-aligner" aria-hidden="true"><span class="octicon octicon-link"></span></a>Sbwt aligner</h1>
 
-<blockquote>
+<p>Sbwt aligner is a Burrows–Wheeler transform (BWT) based fast aligner specialized in parallelized indexing from Next Generation Sequencing data.  </p>
+
+<p>Sbwt aligner is released under GPLv2 with additional restriction so that is only applicable to individuals and non-profits and that any for-profit company must purchase a different license.    </p>
+
+<h2>
+<a id="install" class="anchor" href="#install" aria-hidden="true"><span class="octicon octicon-link"></span></a>INSTALL</h2>
+
+<p>*Only 64 bits systems are able to compile and run Sbwt aligner.</p>
+
+<h3>
+<a id="run-the-binary-directly-without-installation" class="anchor" href="#run-the-binary-directly-without-installation" aria-hidden="true"><span class="octicon octicon-link"></span></a>Run the binary directly without installation</h3>
+
+<p>Please try the precompiled binaries first, most of the linux systems should be able to run Tailor without any troubles.</p>
+
+<div class="highlight highlight-bash"><pre>bin/sbwt_linux      <span class="pl-c"># for linux</span></pre></div>
+
+<h3>
+<a id="compile-from-the-source-code" class="anchor" href="#compile-from-the-source-code" aria-hidden="true"><span class="octicon octicon-link"></span></a>Compile from the source code</h3>
+
 <h4>
-<a id="require" class="anchor" href="#require" aria-hidden="true"><span class="octicon octicon-link"></span></a>require</h4>
+<a id="install-the-dependencies" class="anchor" href="#install-the-dependencies" aria-hidden="true"><span class="octicon octicon-link"></span></a>Install the dependencies</h4>
 
 <ul>
-<li>CMake version 2.6 or newer</li>
-<li>boost 1.55.0</li>
-<li>g++ 4.7 or newer</li>
+<li>1.1 Relative recent C++ compiler that support most features of C++11. We recommend <a href="http://gcc.gnu.org/">GCC</a>.</li>
+<li>1.2 <a href="http://www.boost.org/users/download/">Boost</a>
+</li>
+<li>1.3 <a href="http://www.cmake.org/">CMake</a>
+</li>
 </ul>
 
 <h4>
-<a id="setup" class="anchor" href="#setup" aria-hidden="true"><span class="octicon octicon-link"></span></a>setup</h4>
+<a id="get-the-latest-version-of-the-software" class="anchor" href="#get-the-latest-version-of-the-software" aria-hidden="true"><span class="octicon octicon-link"></span></a>Get the latest version of the software</h4>
 
-<pre><code>$cmake .
-$make
-</code></pre>
+<div class="highlight highlight-bash"><pre>git clone git@github.com:jhhung/sBWT.git</pre></div>
 
 <h4>
-<a id="usage" class="anchor" href="#usage" aria-hidden="true"><span class="octicon octicon-link"></span></a>usage</h4>
+<a id="enter-the-folder-sbwt-and" class="anchor" href="#enter-the-folder-sbwt-and" aria-hidden="true"><span class="octicon octicon-link"></span></a>Enter the folder sBWT and:</h4>
 
-<p>build index</p>
+<ul>
+<li>Set environmental variable <code>$BOOST_ROOT</code> to the directory of boost if CMake cannot find boost automatically;</li>
+<li>Set environmental variable <code>$CC</code> and <code>$CXX</code> to the gcc/g++ compiler you want to use.<br>
+</li>
+</ul>
 
-<pre><code>$./sbwt build -i [reference.fa] -p [ouput prefix]
-</code></pre>
+<div class="highlight highlight-bash"><pre>cmake <span class="pl-s3">.</span></pre></div>
 
-<p>for more detail please use :</p>
+<h4>
+<a id="compile-the-software-by-typing" class="anchor" href="#compile-the-software-by-typing" aria-hidden="true"><span class="octicon octicon-link"></span></a>Compile the software by typing:</h4>
 
-<pre><code>$./sbwt build -h
-</code></pre>
+<div class="highlight highlight-bash"><pre>make</pre></div>
 
-<p>alignment</p>
+<h4>
+<a id="troubleshooting" class="anchor" href="#troubleshooting" aria-hidden="true"><span class="octicon octicon-link"></span></a>troubleshooting</h4>
 
-<pre><code>$./sbwt map -i [reads.fq] -p [index prefix] -o [ouput.sam]
-</code></pre>
+<ul>
+<li>If you got linker error, it is possible that the default library in the lib/ is not suitable to your platform. 
+There are one librarie for linux available, rename the file that fit the best to "libabwt_table.a",
+and retype </li>
+</ul>
 
-<p>for mor detail please use :</p>
+<div class="highlight highlight-bash"><pre>make</pre></div>
 
-<pre><code>$./sbwt map -h
-</code></pre>
-</blockquote>
+<h2>
+<a id="usage" class="anchor" href="#usage" aria-hidden="true"><span class="octicon octicon-link"></span></a>USAGE</h2>
+
+<h4>
+<a id="build-genomic-index-similar-to-bowtie-build" class="anchor" href="#build-genomic-index-similar-to-bowtie-build" aria-hidden="true"><span class="octicon octicon-link"></span></a>Build genomic index (similar to bowtie-build)</h4>
+
+<div class="highlight highlight-bash"><pre>sbwt build -i [genome.fa] -p [ouput prefix]</pre></div>
+
+<h4>
+<a id="mapping" class="anchor" href="#mapping" aria-hidden="true"><span class="octicon octicon-link"></span></a>Mapping</h4>
+
+<div class="highlight highlight-bash"><pre>sbwt map -i [reads.fq] -p [index prefix] -o [output.sam]</pre></div>
+
+<h1>
+<a id="gpu-version" class="anchor" href="#gpu-version" aria-hidden="true"><span class="octicon octicon-link"></span></a>GPU version</h1>
+
+<h2>
+<a id="install-1" class="anchor" href="#install-1" aria-hidden="true"><span class="octicon octicon-link"></span></a>Install</h2>
+
+<p>In sbwtCuda direction</p>
+
+<div class="highlight highlight-bash"><pre>bin/com_rf  <span class="pl-c">#for mapping</span>
+bin/com_tbl <span class="pl-c">#for indexing</span></pre></div>
+
+<h3>
+<a id="compile-from-the-source-code-1" class="anchor" href="#compile-from-the-source-code-1" aria-hidden="true"><span class="octicon octicon-link"></span></a>Compile from the source code</h3>
+
+<h4>
+<a id="install-the-dependencies-1" class="anchor" href="#install-the-dependencies-1" aria-hidden="true"><span class="octicon octicon-link"></span></a>Install the dependencies</h4>
+
+<ul>
+<li>1.1 Relative recent C++ compiler that support most features of C++11. We recommend <a href="http://gcc.gnu.org/">GCC</a>.</li>
+<li>1.2 <a href="http://www.boost.org/users/download/">Boost</a>
+</li>
+<li>1.3 CUDA's Compute Capability 2.0, Tesla K20 is recommended</li>
+</ul>
+
+<h4>
+<a id="enter-the-folder-sbwtcuda-and" class="anchor" href="#enter-the-folder-sbwtcuda-and" aria-hidden="true"><span class="octicon octicon-link"></span></a>Enter the folder sbwtCuda and:</h4>
+
+<ul>
+<li>Set environmental variable <code>$CC</code> and <code>$CXX</code> to the gcc/g++ compiler you want to use.</li>
+</ul>
+
+<div class="highlight highlight-bash"><pre>make com_rf     <span class="pl-c">#for mapping</span>
+make com_tbl    <span class="pl-c">#for indexing</span></pre></div>
+
+<h2>
+<a id="usage-1" class="anchor" href="#usage-1" aria-hidden="true"><span class="octicon octicon-link"></span></a>USAGE</h2>
+
+<div class="highlight highlight-bash"><pre>com_tbl [reference.fa] xxx 3125 128 4000000                 <span class="pl-c">#for indexing</span>
+<span class="pl-c">#the bwt file will generate in local diretion where you run the program.</span>
+
+com_rf xxx [reads.fq] 3125 128 [reads number] <span class="pl-k">&gt;</span> [output.sam]    <span class="pl-c">#for mapping</span>
+<span class="pl-c">#the "xxx" and numeric parameter is unessesery please just copy it.</span></pre></div>
+
+<h2>
+<a id="contact" class="anchor" href="#contact" aria-hidden="true"><span class="octicon octicon-link"></span></a>Contact</h2>
+
+<ul>
+<li>Jui-Hung Hung <a href="mailto:juihunghung@gmail.com">juihunghung@gmail.com</a>
+</li>
+<li>Chou Min-Te <a href="mailto:poi5305@gmail.com">poi5305@gmail.com</a>
+</li>
+<li>Hong Ting-Wei <a href="mailto:thestyle1202@gmail.com">thestyle1202@gmail.com</a>
+</li>
+<li>Chang Chia-Hua <a href="mailto:CHChang810716@gmail.com">CHChang810716@gmail.com</a>
+</li>
+</ul>
       </section>
       <footer>
         <p>Project maintained by <a href="https://github.com/jhhung">jhhung</a></p>
