@@ -1462,7 +1462,7 @@ void map(int argc, char *argv[])
 						std::advance(it, result_it[base + j]);
 						if (result_rc[base + j ] == false)
 						{
-							std::cout << vec_read_name[i] << "\t"
+							std::cout << vec_read_name[i].erase(0, 1) << "\t"
 									  << MAPPED << "\t"
 									  << it->second << "\t"
 									  << resultz[base + j] + 1 << "\t"
@@ -1476,7 +1476,7 @@ void map(int argc, char *argv[])
 						}
 						else
 						{
-							std::cout << vec_read_name[i] << "\t"
+							std::cout << vec_read_name[i].erase(0, 1) << "\t"
 									  << REVERSE_COMPLEMENTED << "\t"
 									  << it->second << "\t"
 									  << resultz[base + j] + 1 << "\t"
