@@ -1,6 +1,8 @@
 #define CUDA_ERROR_CHECK
- 
-#define CudaSafeCall( err ) __cudaSafeCall( err, __FILE__, __LINE__ )
+#include <iostream> 
+#define CudaSafeCall( err ) \
+__cudaSafeCall( err, __FILE__, __LINE__ )
+
 #define CudaCheckError()    __cudaCheckError( __FILE__, __LINE__ )
  
 inline void __cudaSafeCall( cudaError err, const char *file, const int line )
@@ -41,7 +43,17 @@ inline void __cudaCheckError( const char *file, const int line )
 
 	return;
 }
-
+size_t getCudaFreeMemSize()
+{
+	size_t free_byte;
+	size_t total_byte;
+	cudaError_t cuda_status = cudaMemGetInfo( &free_byte, &total_byte ) ;
+	if ( cudaSuccess != cuda_status ){
+		fprintf(stderr, "Error: cudaMemGetInfo fails, %s \n", cudaGetErrorString(cuda_status) );
+		exit(1);
+	}
+    return free_byte;
+}
 void showCudaUsage() {
 	size_t free_byte;
 	size_t total_byte;
