@@ -27,6 +27,8 @@
 
 typedef unsigned short Type;
 typedef long long INTTYPE;
+#define CARD_MEMORY_LIMIT 6442450944
+// #define CARD_MEMORY_LIMIT 1048576
 #define SUFFIXLEN 256 //###
 //#define SUFFIXLEN 16 //###
 #define TBLSTRIDE 32 //###
@@ -209,7 +211,7 @@ inline __host__ __device__ int get_token_id(char *token) {
 
 inline __host__ __device__ Type  my_atoi(const char *str) {
 	Type ret;
-	unsigned char tmp;
+	unsigned char tmp = 0;
 
 	if (str[0] == 'C') {
 		tmp = 1;
@@ -232,6 +234,9 @@ inline __host__ __device__ Type  my_atoi(const char *str) {
 			tmp = 2;
 		} else if (str[i] == 'T') {
 			tmp = 3;
+        } else if ( str[i] == '\0' ) { // this condition change the spec
+            tmp = 0;
+            break;
 		} else {
 			tmp = 0;
 		}
@@ -268,13 +273,23 @@ __global__ void seq_encoding(char *dna_seq, const int max_task) {
 	}
 }
 
-__global__ void bseq_encoding(char *dna_seq, Type *bseq_ptr, const int bseq_size) {
+__global__ void bseq_encoding(char *dna_seq, Type *bseq_ptr, const int bseq_size, const size_t segment_offset) {
 	const int startID = (blockIdx.y*gridDim.x+blockIdx.x)*(blockDim.x*blockDim.y);
-	int globalID = startID+(threadIdx.y*blockDim.x+threadIdx.x);
+	int globalID = segment_offset + startID + (threadIdx.y*blockDim.x+threadIdx.x);
 	if (globalID >= bseq_size) return;
 
 	bseq_ptr[globalID] = my_atoi(dna_seq + (globalID * ENCODELEN));
-	//printf("gid %d is %u\n", globalID, bseq_ptr[globalID]);
+	printf("gid %d is %u\n", globalID, bseq_ptr[globalID]);
+	printf("gid %d offset %d\n", globalID, globalID * ENCODELEN);
+}
+__global__ void bseq_encoding_check_seq (char *dna_seq, Type *bseq_ptr, const int64_t seq_size, const int64_t segment_offset) {
+	const int64_t startID = (blockIdx.y*gridDim.x+blockIdx.x)*(blockDim.x*blockDim.y);
+	int64_t globalID = startID + (threadIdx.y*blockDim.x+threadIdx.x);
+	if (globalID >= seq_size) return;
+    char* const tmp = dna_seq + (globalID * ENCODELEN);
+	bseq_ptr[globalID + segment_offset] = my_atoi ( tmp );
+	// printf("gid %d is %u\n", globalID, bseq_ptr[globalID + segment_offset]);
+	// printf("gid %d offset %d\n", globalID, globalID * ENCODELEN);
 }
 
 inline __host__ __device__ int get_occ_table(int position, int token, int occ_table_reduce[][4], char *sbwt_string) {
@@ -556,30 +571,100 @@ void sbwt_string_create(char *sbwt_string, char *d_reference_char, thrust::host_
 	CudaSafeCall( cudaMemcpy(sbwt_string, d_sbwt_string, sizeof(char) * num_suffix, cudaMemcpyDeviceToHost) );
 	cudaFree(d_sbwt_string);
 }
-
 // d_reference_char, bseq_ptr和bseq_size都是回傳用的
+void compress_reference_check(const char *reference_char, Type **bseq_ptr, int &bseq_size)
+{
+    const char* ref_end ( reference_char + strlen(reference_char) );
+    std::vector<Type> bseq_result;
+    std::vector<Type> bseq_answer;
+    bseq_result.reserve(bseq_size);
+    bseq_answer.reserve(bseq_size);
+	CudaSafeCall( cudaMemcpy( bseq_result.begin().base(), *bseq_ptr, bseq_size * sizeof(Type), cudaMemcpyDeviceToHost ) );
+	CudaCheckError();
+    int k = 0;
+    for(const char* itr = reference_char; itr < ref_end; itr += ENCODELEN )
+    {
+        bseq_answer.push_back(my_atoi(itr));
+        k ++;
+    }
+    // for(size_t i = 0; i < (strlen(reference_char) + ENCODELEN - 1 )/ ENCODELEN; i++)
+    // {
+    //     bseq_answer[i] = my_atoi(reference_char + (i * ENCODELEN));
+    // }
+    for(size_t i = 0; i < bseq_size; i ++ )
+    {
+        assert(bseq_result[i] == bseq_answer[i]);
+    }
+}
 void compress_reference(const char *reference_char, char **d_reference_char, Type **bseq_ptr, int &bseq_size)
 {
-	const int len_dna_padded = strlen(reference_char);
-
-	CudaSafeCall( cudaMalloc((void **)d_reference_char, sizeof(char) * len_dna_padded) );
-	CudaSafeCall( cudaMemcpy(*d_reference_char, reference_char, sizeof(char) * len_dna_padded, cudaMemcpyHostToDevice) );
-
-	// bseq is d_reference_char_binary
-	bseq_size = (len_dna_padded + ENCODELEN - 1) / ENCODELEN;
-
+	const int64_t len_dna_padded = strlen(reference_char);
+    std::cout << "len_dna_padded : " << len_dna_padded << std::endl;
+    int64_t ref_total_need_mem = sizeof(char) * len_dna_padded;
+    std::cout << "ref_total_need_mem : " << ref_total_need_mem << std::endl;
+    const int64_t mem_limit = CARD_MEMORY_LIMIT * 0.6 ; // 60% for reference uncompressed data and round to 4's mul
+    std::cout << "mem_limit : " << mem_limit << std::endl;
+    const int64_t mem_limit_in_char =  ( mem_limit / sizeof(char) ) / ENCODELEN * ENCODELEN; 
+    std::cout << "mem_limit_in_char : " << mem_limit_in_char << std::endl;
+    int64_t aggrigate_char_num = 0;
+	bseq_size = ( len_dna_padded + ENCODELEN - 1) / ENCODELEN;
+    std::cout << "bseq_size : " << bseq_size << std::endl;
+    std::cout << "ENCODELEN : " << ENCODELEN << std::endl;
 	static thrust::device_vector<Type> d_bseq(bseq_size + 1);
 	d_bseq[bseq_size] = 0;
-
 	*bseq_ptr = thrust::raw_pointer_cast(&d_bseq[0]);
-
-	dim3 dim3_grid, dim3_block;
-
-	advance_cuda_config(dim3_grid, dim3_block, bseq_size);
-
-	bseq_encoding<<<dim3_grid, dim3_block>>>(*d_reference_char, *bseq_ptr, bseq_size);
-
+	// CudaSafeCall( cudaMalloc((void **)d_reference_char, sizeof(char) * len_dna_padded) );
+	CudaSafeCall( cudaMalloc( (void **)d_reference_char, std::min ( 
+        (int64_t)(mem_limit_in_char * sizeof(char))
+        , ref_total_need_mem 
+    ) ) );
 	CudaCheckError();
+    size_t aggrigate_ref_offset = 0;
+    int compress_segment_count(0);
+    for( int64_t remain(len_dna_padded) ; remain > 0; remain -= mem_limit_in_char )
+    {
+	    // CudaSafeCall( cudaMemcpy(*d_reference_char, reference_char, sizeof(char) * len_dna_padded, cudaMemcpyHostToDevice) );
+	    CudaSafeCall( cudaMemcpy( 
+            *d_reference_char
+            , reference_char + aggrigate_ref_offset
+            , std::min ( 
+                (int64_t)(mem_limit_in_char * sizeof(char))
+                , remain + 1 ) // + 1 for \0
+            , cudaMemcpyHostToDevice) );
+	    CudaCheckError();
+
+	    // bseq is d_reference_char_binary
+
+	    dim3 dim3_grid, dim3_block;
+
+	    // advance_cuda_config(dim3_grid, dim3_block, mem_limit_in_char);
+        // size_t bseq_seg_size ( ( mem_limit_in_char + ENCODELEN - 1) / ENCODELEN );
+        size_t bseq_seg_size ( 
+            std::min(
+                mem_limit_in_char / ENCODELEN
+                , ( remain + ENCODELEN - 1 )/ ENCODELEN));
+        size_t seq_seg_size ( std::min(mem_limit_in_char, remain) );
+        std::cout << "seq_seg_size : " << seq_seg_size << std::endl;
+        std::cout << "bseq_seg_size : " << bseq_seg_size << std::endl;
+	    advance_cuda_config(dim3_grid, dim3_block, bseq_seg_size);
+        std::cout << "aggrigate_char_num : " << aggrigate_char_num << std::endl;
+	    bseq_encoding_check_seq<<<dim3_grid, dim3_block>>> ( 
+            *d_reference_char
+            , *bseq_ptr
+            // , seq_seg_size
+            , bseq_seg_size
+            , aggrigate_char_num
+        );
+        // release d_reference_char
+	    CudaCheckError();
+
+        aggrigate_char_num += bseq_seg_size;
+        aggrigate_ref_offset += mem_limit_in_char;
+        compress_segment_count ++;
+    }
+    std::cout << "aggrigate_char_num : " << aggrigate_char_num << std::endl;
+    std::cout << "compress_segment_count : " << compress_segment_count << '\n';
+    CudaSafeCall(cudaFree( *d_reference_char ));
 }
 
 
@@ -721,7 +806,12 @@ void classify_seq_tables_cuda(int *d_suffixs_ptr, int size_suffix, int *d_result
 }
 
 
-void classify_seq_tables(std::vector<int> &split_table, Type *bseq_ptr, int bseq_size, thrust::host_vector<int> &suffix_array, std::vector< thrust::host_vector<int> > &SeqTables, std::vector<std::string> archive_name)
+void classify_seq_tables(
+      std::vector<int> &split_table
+    , Type *bseq_ptr, int bseq_size
+    , thrust::host_vector<int> &suffix_array
+    , std::vector< thrust::host_vector<int> > &SeqTables
+    , std::vector<std::string> archive_name)
 {
 	dim3 dim3_grid, dim3_block;
 
@@ -736,9 +826,9 @@ void classify_seq_tables(std::vector<int> &split_table, Type *bseq_ptr, int bseq
 	//showCudaUsage();
 
 	// can not send data over cuda total memory size
-	const int MAX_NUM_TO_CUDA = 200000000;
+	const int64_t MAX_NUM_TO_CUDA = 200000000;
 
-	int start, end = 0;
+	int64_t start, end = 0;
 
 	for (int i = 0; end < h_suffixs.size(); i++)
 	{
@@ -762,7 +852,16 @@ void classify_seq_tables(std::vector<int> &split_table, Type *bseq_ptr, int bseq
 
 			{
 				Timer in("Classify inner");
-				classify_seq_tables_cuda<<<dim3_grid, dim3_block>>>(d_suffixs_ptr, h_suffixs.size(), d_result_ptr, d_sampler_ptr, h_sampler.size(), bseq_ptr, bseq_size, start);
+				classify_seq_tables_cuda<<<dim3_grid, dim3_block>>>(
+                      d_suffixs_ptr
+                    , h_suffixs.size()
+                    , d_result_ptr
+                    , d_sampler_ptr
+                    , h_sampler.size()
+                    , bseq_ptr
+                    , bseq_size
+                    , start
+                );
 			}
 
 			thrust::host_vector<int> h_result = d_result;
@@ -775,7 +874,13 @@ void classify_seq_tables(std::vector<int> &split_table, Type *bseq_ptr, int bseq
 	}
 }
 
-void mkq_sort(std::vector<std::string> &archive_name, thrust::host_vector<int> &suffix_array, std::vector< thrust::host_vector<int> > &SeqTables, Type *bseq_ptr, int bseq_size)
+void mkq_sort(
+      std::vector<std::string> &archive_name
+    , thrust::host_vector<int> &suffix_array
+    , std::vector< thrust::host_vector<int> > &SeqTables
+    , Type *bseq_ptr
+    , int bseq_size
+)
 {
 	//std::vector<std::string> archive_name;
 	//archive_load("archive_name.archive", archive_name);
@@ -803,12 +908,19 @@ void mkq_sort(std::vector<std::string> &archive_name, thrust::host_vector<int> &
 }
 
 
-void split_sort(std::vector<std::string> &archive_name, Type *bseq_ptr, int bseq_size, int num_suffix, thrust::host_vector<int> &suffix_array, int average_size = 100000000, int len_compare = SUFFIXLEN)
+void split_sort(
+    std::vector<std::string> &archive_name
+    , Type *bseq_ptr
+    , int64_t bseq_size
+    , int64_t num_suffix
+    , thrust::host_vector<int> &suffix_array
+    , int64_t average_size = 100000000
+    , int len_compare = SUFFIXLEN)
 {
-	int split_num = num_suffix / average_size;
+	int64_t split_num = num_suffix / average_size;
 	if (split_num == 0) split_num = 1;
 	std::cerr << "split_num: " << split_num << "\n";
-	int random_num = split_num * 4;
+	int64_t random_num = split_num * 4;
 
 	// split_table is used for sampling
 	std::vector<int> split_table;
@@ -1079,9 +1191,9 @@ void build(int argc, char *argv[])
 	dna.resize(dna.size() - 1);
 
 	char *dna_seq = (char *)dna.c_str();
-	const int len_dna_padded = strlen(dna_seq) + SUFFIXLEN;
+	const int64_t len_dna_padded = strlen(dna_seq) + SUFFIXLEN;
 
-	const int numSuffix = len_dna_padded - (SUFFIXLEN - 1);
+	const size_t numSuffix = len_dna_padded - (SUFFIXLEN - 1);
 	std::cerr << "numSuffix " << numSuffix << "\n";
 
 
@@ -1098,7 +1210,9 @@ void build(int argc, char *argv[])
 	{
 		Timer tm("Compress");
 		compress_reference(dna.c_str(), &d_reference_char, &bseq_ptr, bseq_size);
-		//test_bseq<<<1, 1>>>(bseq_ptr, bseq_size);
+        // compress_reference_check(dna.c_str(), &bseq_ptr, bseq_size);
+		// test_bseq<<<1, 1>>>(bseq_ptr, bseq_size);
+        // exit(1);
 	}
 
 	{
