@@ -22,6 +22,7 @@
 #include <boost/serialization/vector.hpp>
 #include <boost/serialization/map.hpp>
 #include <boost/lexical_cast.hpp>
+#include <memory>
 
 #include "my_genome_pre_handler.hpp"
 
@@ -62,6 +63,7 @@ struct Timer {
 	timeval start, end;
 	
 	Timer(char *itopic = NULL): topic(itopic) {
+		fprintf(stderr, "[start: %s]\n", topic);
 		gettimeofday(&start, NULL);
 	}
 
@@ -273,14 +275,23 @@ __global__ void seq_encoding(char *dna_seq, const int max_task) {
 	}
 }
 
+__global__ void bseq_encoding(char *dna_seq, Type *bseq_ptr, const int bseq_size) {
+	const int startID = (blockIdx.y*gridDim.x+blockIdx.x)*(blockDim.x*blockDim.y);
+	int globalID = startID+(threadIdx.y*blockDim.x+threadIdx.x);
+	if (globalID >= bseq_size) return;
+
+	bseq_ptr[globalID] = my_atoi(dna_seq + (globalID * ENCODELEN));
+	// printf("gid %d is %u\n", globalID, bseq_ptr[globalID]);
+	// printf("gid %d offset %u\n", globalID, globalID * ENCODELEN);
+}
 __global__ void bseq_encoding(char *dna_seq, Type *bseq_ptr, const int bseq_size, const size_t segment_offset) {
 	const int startID = (blockIdx.y*gridDim.x+blockIdx.x)*(blockDim.x*blockDim.y);
 	int globalID = segment_offset + startID + (threadIdx.y*blockDim.x+threadIdx.x);
 	if (globalID >= bseq_size) return;
 
 	bseq_ptr[globalID] = my_atoi(dna_seq + (globalID * ENCODELEN));
-	printf("gid %d is %u\n", globalID, bseq_ptr[globalID]);
-	printf("gid %d offset %d\n", globalID, globalID * ENCODELEN);
+	// printf("gid %d is %u\n", globalID, bseq_ptr[globalID]);
+	// printf("gid %d offset %d\n", globalID, globalID * ENCODELEN);
 }
 __global__ void bseq_encoding_check_seq (char *dna_seq, Type *bseq_ptr, const int64_t seq_size, const int64_t segment_offset) {
 	const int64_t startID = (blockIdx.y*gridDim.x+blockIdx.x)*(blockDim.x*blockDim.y);
@@ -534,8 +545,51 @@ inline void advance_cuda_config(dim3 &dim_grid, dim3 &dim_block, int total, int 
 	const int count = max_blk * max_thd * max_thd;
 	dim_grid.y = (total + count - 1) / count;
 }
-
-
+__host__ __device__ char base_decode ( const Type& base_code )
+{
+    Type tmp = base_code & 3;
+    // if      ( tmp == 0 ) return 'A';
+    // else if ( tmp == 1 ) return 'C';
+    // else if ( tmp == 2 ) return 'G';
+    // else if ( tmp == 3 ) return 'T';
+    // else asm("trap;");
+    switch ( base_code & 3 )
+    {
+        case 0 : return 'A';
+        case 1 : return 'C';
+        case 2 : return 'G';
+        case 3 : return 'T';
+    }
+} 
+__global__ void print_seq( Type* bseq_ptr, uint64_t size)
+{
+	const int startID = (blockIdx.y*gridDim.x+blockIdx.x)*(blockDim.x*blockDim.y);
+	int globalID = startID+(threadIdx.y*blockDim.x+threadIdx.x);
+    if( globalID >= size ) return ;
+	printf("gid %d is %d\n", globalID, bseq_ptr[globalID]);
+}
+__host__ __device__ char get_element ( Type* bseq_ptr, uint64_t idx )
+{
+    uint64_t bidx = (idx >> 3);
+    Type code ( bseq_ptr[bidx] );
+    int16_t offset ( TYPEBITS - ( ( idx & 7 ) << 1 )  - 2); // base number, so *2 convert to bit number ( 1 base encode to 2 bit )
+    Type base_code ( ( code >> offset ) & 3 );
+    return base_decode ( base_code );
+}
+__host__ __device__ char get_element ( const char reference[], uint64_t idx )
+{
+    return reference[idx];
+}
+void test_get_element( Type*& bseq_ptr, const uint64_t& bseq_size, const char reference[], const uint64_t& len )
+{
+    std::vector<Type> bseq_host;
+    bseq_host.resize(bseq_size);
+	CudaSafeCall( cudaMemcpy( bseq_host.begin().base(), bseq_ptr, bseq_size * sizeof(Type), cudaMemcpyDeviceToHost ) );
+    for ( uint64_t i (0); i < len; i ++ )
+    {
+        assert ( get_element ( bseq_host.begin().base(), i ) == get_element( reference, i ) );
+    }
+}
 __global__ void sbwt_chain(int suffix_sorted[],char reference[],  char sbwt_string[], int num_suffix) {
 	const int startID = (blockIdx.y*gridDim.x+blockIdx.x)*(blockDim.x*blockDim.y);
 	int globalID = startID+(threadIdx.y*blockDim.x+threadIdx.x);
@@ -545,7 +599,20 @@ __global__ void sbwt_chain(int suffix_sorted[],char reference[],  char sbwt_stri
 	if (suffix_sorted[globalID] == 0)
 		sbwt_string[globalID] = '$';
 	else
-		sbwt_string[globalID] = *(reference + suffix_sorted[globalID] - 1);
+		sbwt_string[globalID] = get_element(reference, suffix_sorted[globalID] - 1);
+}
+__global__ void sbwt_chain(int suffix_sorted[], Type* bseq_ptr, char sbwt_string[], int num_suffix) {
+	const int startID = (blockIdx.y*gridDim.x+blockIdx.x)*(blockDim.x*blockDim.y);
+	int globalID = startID+(threadIdx.y*blockDim.x+threadIdx.x);
+
+	if (globalID >= num_suffix) return;
+	
+	if (suffix_sorted[globalID] == 0)
+		sbwt_string[globalID] = '$';
+	else
+    {
+		sbwt_string[globalID] = get_element(bseq_ptr, suffix_sorted[globalID] - 1);
+    }
 }
 
 
@@ -571,17 +638,36 @@ void sbwt_string_create(char *sbwt_string, char *d_reference_char, thrust::host_
 	CudaSafeCall( cudaMemcpy(sbwt_string, d_sbwt_string, sizeof(char) * num_suffix, cudaMemcpyDeviceToHost) );
 	cudaFree(d_sbwt_string);
 }
-// d_reference_char, bseq_ptr和bseq_size都是回傳用的
-void compress_reference_check(const char *reference_char, Type **bseq_ptr, int &bseq_size)
+void sbwt_string_create(char *sbwt_string, Type* bseq_ptr, thrust::host_vector<int> &suffix_array)
 {
-    const char* ref_end ( reference_char + strlen(reference_char) );
+	dim3 dim3_grid, dim3_block;
+
+	char *d_sbwt_string;
+	int num_suffix = suffix_array.size();
+	thrust::device_vector<int> d_vals(suffix_array);
+	int *d_vals_ptr = thrust::raw_pointer_cast(&d_vals[0]);
+
+	CudaSafeCall( cudaMalloc((void **)&d_sbwt_string, sizeof(char) * num_suffix) );
+
+	advance_cuda_config(dim3_grid, dim3_block, num_suffix);
+
+	sbwt_chain<<<dim3_grid, dim3_block>>>(d_vals_ptr, bseq_ptr, d_sbwt_string, num_suffix);
+	CudaCheckError();
+    // exit(1);
+	CudaSafeCall( cudaMemcpy(sbwt_string, d_sbwt_string, sizeof(char) * num_suffix, cudaMemcpyDeviceToHost) );
+	cudaFree(d_sbwt_string);
+}
+void compress_reference_check(const char *reference_char, size_t& seq_size, Type *bseq_ptr, int &bseq_size)
+{
+    const char* ref_end ( reference_char + seq_size );
     std::vector<Type> bseq_result;
     std::vector<Type> bseq_answer;
-    bseq_result.reserve(bseq_size);
-    bseq_answer.reserve(bseq_size);
-	CudaSafeCall( cudaMemcpy( bseq_result.begin().base(), *bseq_ptr, bseq_size * sizeof(Type), cudaMemcpyDeviceToHost ) );
+    bseq_result.resize(bseq_size +1);
+    bseq_answer.reserve(bseq_size+1);
+	CudaSafeCall( cudaMemcpy( bseq_result.begin().base(), bseq_ptr, bseq_size * sizeof(Type), cudaMemcpyDeviceToHost ) );
 	CudaCheckError();
     int k = 0;
+    bseq_answer[bseq_size] = 0;
     for(const char* itr = reference_char; itr < ref_end; itr += ENCODELEN )
     {
         bseq_answer.push_back(my_atoi(itr));
@@ -596,13 +682,65 @@ void compress_reference_check(const char *reference_char, Type **bseq_ptr, int &
         assert(bseq_result[i] == bseq_answer[i]);
     }
 }
-void compress_reference(const char *reference_char, char **d_reference_char, Type **bseq_ptr, int &bseq_size)
+void d_compress_reference_check(
+      const char *d_reference_char // reference_char
+    , size_t &seq_size
+    , Type *bseq_ptr
+    , int &bseq_size
+    , const char *h_reference_char
+)
+{
+    std::string reference_char(seq_size, 'Q');
+    assert ( reference_char.length() == seq_size );
+    assert ( reference_char.c_str()[seq_size] == '\0' );
+	CudaSafeCall( cudaMemcpy( (void*)reference_char.c_str()
+        , d_reference_char, seq_size + 1, cudaMemcpyDeviceToHost ) );
+    assert ( reference_char.c_str()[seq_size] == '\0' );
+    assert ( reference_char.length() == seq_size );
+    // size_t i = 0;
+    // while (true)
+    // {
+    //     if( h_reference_char[i] == '\0' ) break;
+    //     assert(reference_char[i] == h_reference_char[i]);
+    //     i ++;
+    // } 
+    // assert(i == seq_size);
+    // compress_reference_check( h_reference_char, seq_size, bseq_ptr, bseq_size );
+    compress_reference_check( reference_char.begin().base(), seq_size, bseq_ptr, bseq_size );
+}
+// void compress_reference(const char *reference_char, char **d_reference_char, Type **bseq_ptr, int &bseq_size)
+// {
+// 	const int len_dna_padded = strlen(reference_char);
+//     assert ( reference_char[len_dna_padded] == '\0' );
+// 
+// 	CudaSafeCall( cudaMalloc((void **)d_reference_char, sizeof(char) * len_dna_padded + 1) );
+// 	CudaSafeCall( cudaMemcpy(*d_reference_char, reference_char, sizeof(char) * len_dna_padded + 1, cudaMemcpyHostToDevice) );
+// 
+// 	// bseq is d_reference_char_binary
+// 	bseq_size = (len_dna_padded + ENCODELEN - 1) / ENCODELEN;
+//     std::cout << "bseq_size : " << bseq_size << std::endl;
+// 
+// 	static thrust::device_vector<Type> d_bseq(bseq_size + 1);
+// 	d_bseq[bseq_size] = 0;
+// 
+// 	*bseq_ptr = thrust::raw_pointer_cast(&d_bseq[0]);
+// 
+// 	dim3 dim3_grid, dim3_block;
+// 
+// 	advance_cuda_config(dim3_grid, dim3_block, bseq_size);
+// 
+// 	bseq_encoding<<<dim3_grid, dim3_block>>>(*d_reference_char, *bseq_ptr, bseq_size);
+// 
+// 	CudaCheckError();
+// }
+// d_reference_char, bseq_ptr和bseq_size都是回傳用的
+void compress_reference(const char *reference_char, char **d_reference_char, Type **bseq_ptr, int& bseq_size)
 {
 	const int64_t len_dna_padded = strlen(reference_char);
     std::cout << "len_dna_padded : " << len_dna_padded << std::endl;
-    int64_t ref_total_need_mem = sizeof(char) * len_dna_padded;
+    int64_t ref_total_need_mem = sizeof(char) * len_dna_padded + 1;
     std::cout << "ref_total_need_mem : " << ref_total_need_mem << std::endl;
-    const int64_t mem_limit = CARD_MEMORY_LIMIT * 0.6 ; // 60% for reference uncompressed data and round to 4's mul
+    const int64_t mem_limit = getCudaFreeMemSize() * 0.6 ; // 60% for reference uncompressed data and round to 4's mul
     std::cout << "mem_limit : " << mem_limit << std::endl;
     const int64_t mem_limit_in_char =  ( mem_limit / sizeof(char) ) / ENCODELEN * ENCODELEN; 
     std::cout << "mem_limit_in_char : " << mem_limit_in_char << std::endl;
@@ -624,6 +762,12 @@ void compress_reference(const char *reference_char, char **d_reference_char, Typ
     for( int64_t remain(len_dna_padded) ; remain > 0; remain -= mem_limit_in_char )
     {
 	    // CudaSafeCall( cudaMemcpy(*d_reference_char, reference_char, sizeof(char) * len_dna_padded, cudaMemcpyHostToDevice) );
+        std::cout << "aggrigate_ref_offset : " << aggrigate_ref_offset << std::endl;
+        std::cout << "copy size : " << std::min ( 
+            (int64_t)(mem_limit_in_char * sizeof(char))
+            , remain + 1 )  // + 1 for \0
+            << std::endl;
+        // std::cout << __FILE__ << __LINE__ << reference_char + aggrigate_ref_offset << std::endl;
 	    CudaSafeCall( cudaMemcpy( 
             *d_reference_char
             , reference_char + aggrigate_ref_offset
@@ -631,7 +775,6 @@ void compress_reference(const char *reference_char, char **d_reference_char, Typ
                 (int64_t)(mem_limit_in_char * sizeof(char))
                 , remain + 1 ) // + 1 for \0
             , cudaMemcpyHostToDevice) );
-	    CudaCheckError();
 
 	    // bseq is d_reference_char_binary
 
@@ -693,13 +836,16 @@ thrust::host_vector<int> suffix_sort(int sort_length, thrust::host_vector<int> &
 
 		// 由LSB排到MSB
 		const int PART = (sort_length + ENCODELEN - 1)/ ENCODELEN;
-		for (int round = PART - 1; round >= 0; round--) {
+        {
+            Timer tm("Thrust sort");
+            for (int round = PART - 1; round >= 0; round--) {
 
-			// 複製壓縮序列到排序的key陣列
-			cpy_in_cuda_bseq<<<dim3_grid, dim3_block>>>(d_keys_ptr, bseq_ptr, d_vals_ptr, round, num_suffix, bseq_size);
-			thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_vals.begin(), thrust::less<Type>());
-		}
-
+                // 複製壓縮序列到排序的key陣列
+                cpy_in_cuda_bseq<<<dim3_grid, dim3_block>>>(d_keys_ptr, bseq_ptr, d_vals_ptr, round, num_suffix, bseq_size);
+// std::cout << d_vals.size() << std::endl;
+                thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_vals.begin(), thrust::less<Type>());
+            }
+        }
 		h_vals = d_vals;
 		showCudaUsage();
 		CudaCheckError();
@@ -794,7 +940,15 @@ int bseq_lower_bound(int search, int data[], int len_data, Type *bseq, int bseq_
 
 
 __global__
-void classify_seq_tables_cuda(int *d_suffixs_ptr, int size_suffix, int *d_result_ptr, int *d_sampler_ptr, int size_sampler, Type *bseq_ptr, int bseq_size, const int start_of_this_stage)
+void classify_seq_tables_cuda(
+      int *d_suffixs_ptr
+    , int size_suffix
+    , int *d_result_ptr
+    , int *d_sampler_ptr
+    , int size_sampler
+    , Type *bseq_ptr
+    , int bseq_size
+    , const int start_of_this_stage)
 {
 	const int startID = (blockIdx.y*gridDim.x+blockIdx.x)*(blockDim.x*blockDim.y);
 	const int globalID = startID+(threadIdx.y*blockDim.x+threadIdx.x);
@@ -808,11 +962,22 @@ void classify_seq_tables_cuda(int *d_suffixs_ptr, int size_suffix, int *d_result
 
 void classify_seq_tables(
       std::vector<int> &split_table
-    , Type *bseq_ptr, int bseq_size
+    , Type *bseq_ptr
+    , int bseq_size
     , thrust::host_vector<int> &suffix_array
     , std::vector< thrust::host_vector<int> > &SeqTables
+    // , std::vector< std::pair< std::string, uint64_t > >& SeqTables
     , std::vector<std::string> archive_name)
 {
+    // std::vector< std::ofstream* > SeqTablesf;
+    // SeqTablesf.reserve(SeqTables.size());
+    // for ( int i = 0; i < SeqTables.size(); i ++ )
+    // {
+    //     std::pair<std::string, uint64_t>& p = SeqTables[i];
+    //     std::cout << "open file : " << p.first << std::endl;
+    //     SeqTablesf.push_back( new std::ofstream(p.first.c_str()) );
+    //     p.second = 0;
+    // }
 	dim3 dim3_grid, dim3_block;
 
 	const int num_suffix = suffix_array.size();
@@ -869,26 +1034,44 @@ void classify_seq_tables(
 			for (int i = 0; i < h_result.size(); i++)
 			{
 				SeqTables[h_result[i]].push_back(h_suffixs[i + start]);
+				// *SeqTablesf[h_result[i]] << h_suffixs[i + start] << '\n';
+                // SeqTables[h_result[i]].second ++ ;
 			}
 		}
 	}
+    // for ( int i = 0; i < SeqTablesf.size(); i ++ )
+    // {
+    //     SeqTablesf[i]->flush();
+    //     SeqTablesf[i]->close();
+    //     delete SeqTablesf[i];
+    // }
+    
 }
 
 void mkq_sort(
       std::vector<std::string> &archive_name
     , thrust::host_vector<int> &suffix_array
     , std::vector< thrust::host_vector<int> > &SeqTables
+    // , std::vector< std::pair< std::string, uint64_t > > &SeqTables
     , Type *bseq_ptr
     , int bseq_size
 )
 {
-	//std::vector<std::string> archive_name;
-	//archive_load("archive_name.archive", archive_name);
-
 	for (int i = 0; i < SeqTables.size(); i++)
 	{
 		//std::cerr << "uuu\n";
 		thrust::host_vector<int> &sub_suffix_array = SeqTables[i];
+
+		// thrust::host_vector<int> sub_suffix_array;
+        // sub_suffix_array.reserve(SeqTables[i].second );
+        // std::string seq_table_input_line;
+        // std::ifstream f(SeqTables[i].first.c_str());
+        // while(std::getline(f, seq_table_input_line))
+        // {
+        //     sub_suffix_array.push_back(atoi(seq_table_input_line.c_str()));
+        // }
+        // f.close(); std::remove(SeqTables[i].first.c_str());
+
 		if (sub_suffix_array.size() != 0) 
 		{
 			sub_suffix_array = suffix_sort(SUFFIXLEN, sub_suffix_array, bseq_ptr, bseq_size);
@@ -898,6 +1081,7 @@ void mkq_sort(
 		{
 			Timer tt("Split archive");
 			std::vector<int> each_group(SeqTables[i].begin(), SeqTables[i].end());
+			// std::vector<int> each_group(sub_suffix_array.begin(), sub_suffix_array.end());
 			archive_save(archive_name[i], each_group);
 
 			//thrust::host_vector<int> empty;
@@ -909,13 +1093,14 @@ void mkq_sort(
 
 
 void split_sort(
-    std::vector<std::string> &archive_name
+      std::vector<std::string> &archive_name
     , Type *bseq_ptr
     , int64_t bseq_size
     , int64_t num_suffix
     , thrust::host_vector<int> &suffix_array
     , int64_t average_size = 100000000
-    , int len_compare = SUFFIXLEN)
+    , int len_compare = SUFFIXLEN
+)
 {
 	int64_t split_num = num_suffix / average_size;
 	if (split_num == 0) split_num = 1;
@@ -925,9 +1110,13 @@ void split_sort(
 	// split_table is used for sampling
 	std::vector<int> split_table;
 	std::vector< thrust::host_vector<int> > SeqTables(split_num);
+	// std::vector< std::pair<std::string, uint64_t> > SeqTables(split_num);
+    // for( int i = 0; i < split_num; i ++ )
+    // {
+    //     SeqTables[i].first = "seq_table_" + boost::lexical_cast<std::string>(i);
+    // }
 
 	std::vector<int> random_table = make_random_table(num_suffix, random_num);
-	//std::vector<int> random_sort_w_suffix = suffix_sort(len_compare, random_table, bseq_ptr, bseq_size);
 	thrust::host_vector<int> h_random_table(random_table.begin(), random_table.end());
 	thrust::host_vector<int> random_sort_w_suffix = suffix_sort(len_compare, h_random_table, bseq_ptr, bseq_size);
 
@@ -1192,6 +1381,7 @@ void build(int argc, char *argv[])
 
 	char *dna_seq = (char *)dna.c_str();
 	const int64_t len_dna_padded = strlen(dna_seq) + SUFFIXLEN;
+    std::cout << "len_dna_padded : " << len_dna_padded << std::endl;
 
 	const size_t numSuffix = len_dna_padded - (SUFFIXLEN - 1);
 	std::cerr << "numSuffix " << numSuffix << "\n";
@@ -1206,11 +1396,19 @@ void build(int argc, char *argv[])
 	Timer tm("Table total");
 	dna.append(SUFFIXLEN, 'A');
 
+    // size_t dna_len = dna.length();
+    // std::cout << "dna seq len : " << dna_len << std::endl;
+
 	
 	{
 		Timer tm("Compress");
 		compress_reference(dna.c_str(), &d_reference_char, &bseq_ptr, bseq_size);
-        // compress_reference_check(dna.c_str(), &bseq_ptr, bseq_size);
+
+        // test_get_element( bseq_ptr, bseq_size, dna.c_str(), dna.length() );
+        // compress_reference_check(dna.c_str(), bseq_ptr, bseq_size);
+        // assert(dna.c_str()[dna_len] == '\0');
+        // d_compress_reference_check(d_reference_char, dna_len, bseq_ptr, bseq_size, dna.c_str());
+	    CudaCheckError();
 		// test_bseq<<<1, 1>>>(bseq_ptr, bseq_size);
         // exit(1);
 	}
@@ -1259,6 +1457,13 @@ void build(int argc, char *argv[])
 
 		std::string sbwt_string;
 		int pitch_accumlate = 0;;
+// test_get_element( bseq_ptr, bseq_size, dna.c_str(), dna_len );
+// CudaCheckError();
+// d_compress_reference_check(d_reference_char, dna_len, bseq_ptr, bseq_size, dna.c_str()); // fail
+// CudaCheckError();
+// advance_cuda_config(dim3_grid, dim3_block, bseq_size);
+// print_seq<<<dim3_grid, dim3_block>>>(bseq_ptr, bseq_size);
+// CudaCheckError();
 		for (int i = 0; i < archive_name.size(); i++)
 		{
 			std::vector<int> each_split;
@@ -1267,7 +1472,8 @@ void build(int argc, char *argv[])
 			char *sub_sbwt = new char[each_split.size() + 1];
 			sub_sbwt[each_split.size()] = 0;
 
-			sbwt_string_create(sub_sbwt, d_reference_char, sub_suffix);
+			// sbwt_string_create(sub_sbwt, d_reference_char, sub_suffix);
+			sbwt_string_create(sub_sbwt, bseq_ptr, sub_suffix);
 			sbwt_string.append(sub_sbwt);
 
 			free(sub_sbwt);
@@ -1292,9 +1498,10 @@ void build(int argc, char *argv[])
 
 
 		}
-
+// std::cout << "line : " << __LINE__ << std::endl;
 		int xa = 0, xc = 0, xg = 0, xt = 0;
 		for (int i = 0; i < numSuffix; i++) {
+// std::cout << __LINE__ << "i : " << i << std::endl;
 
 			if (i % TBLSTRIDE == 0) {
 				const int occ_base = occ_cnt * 4;
@@ -1315,6 +1522,7 @@ void build(int argc, char *argv[])
 				xt++;
 
 		}
+// std::cout << "line : " << __LINE__ << std::endl;
 
 		len_location_table = location_cnt;
 
@@ -1341,6 +1549,7 @@ void build(int argc, char *argv[])
 		archive_save("loc_tbl_v.archive", loc_tbl_val_tmp);
 
 		archive_save("fbwt_loc_mark.archive", fbwt_loc_mark_tmp);
+// std::cout << __LINE__ << std::endl;
 
 		//free(sbwt_string);
 		free(occ_table_reduce);
